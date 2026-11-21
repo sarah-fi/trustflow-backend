@@ -1,14 +1,16 @@
-import { Inject, Injectable, ServiceUnavailableException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { SanitizedLogger } from '../common/logging/sanitized-logger';
 import {
   rpc as SorobanRpc,
   Contract,
+  Memo,
   TransactionBuilder,
   BASE_FEE,
   nativeToScVal,
 } from '@stellar/stellar-sdk';
 import { StellarConfig } from '../stellar/stellar.config';
 import { config } from '../config/env.config';
+import { STELLAR_MEMO_MAX_BYTES } from './escrow-write.dto';
 
 export const SOROBAN_RPC_SERVER = 'SOROBAN_RPC_SERVER';
 export const ESCROW_WRITE_STELLAR_CONFIG = 'ESCROW_WRITE_STELLAR_CONFIG';
@@ -79,11 +81,22 @@ export class EscrowReleaseTransactionBuilderService {
   async buildRelease(
     contractEscrowId: string,
     sourceAccount: string,
+    memo?: string,
   ): Promise<UnsignedReleaseTransaction> {
     if (!this.isConfigured) {
       throw new ServiceUnavailableException(
         'TRUSTFLOW_CONTRACT_ID is not set; cannot build a release transaction with no contract to call.',
       );
+    }
+
+    if (memo !== undefined) {
+      const byteLength = Buffer.byteLength(memo, 'utf8');
+      if (byteLength > STELLAR_MEMO_MAX_BYTES) {
+        throw new BadRequestException(
+          `memo exceeds Stellar's ${STELLAR_MEMO_MAX_BYTES}-byte limit for text memos ` +
+            `(got ${byteLength} bytes). Shorten the memo or omit it.`,
+        );
+      }
     }
 
     const account = await this.rpcServer.getAccount(sourceAccount);
@@ -93,8 +106,8 @@ export class EscrowReleaseTransactionBuilderService {
       nativeToScVal(contractEscrowId, { type: 'string' }),
     );
 
-    const buildWithFee = (fee: string): TransactionBuilder =>
-      new TransactionBuilder(account, {
+    const buildWithFee = (fee: string): TransactionBuilder => {
+      const builder = new TransactionBuilder(account, {
         fee,
         networkPassphrase: this.config.networkPassphrase,
       })
@@ -103,6 +116,13 @@ export class EscrowReleaseTransactionBuilderService {
         // configured value means a held XDR expires quickly instead of remaining
         // submittable days later, after dispute/deliverable state has changed.
         .setTimeout(clampReleaseTxValidity(config.STELLAR_TX_VALIDITY_SECONDS));
+
+      if (memo !== undefined) {
+        builder.addMemo(Memo.text(memo));
+      }
+
+      return builder;
+    };
 
     // Simulate explicitly so the resource fee estimated from the contract invocation is
     // actually used. Relying on the flat BASE_FEE (or on prepareTransaction's implicit

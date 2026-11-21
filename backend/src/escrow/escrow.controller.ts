@@ -393,14 +393,20 @@ export class EscrowController {
     description: 'Stellar address that will sign and submit',
     example: 'GXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX',
   })
+  @ApiQuery({
+    name: 'memo',
+    required: false,
+    description: 'Optional text memo (max 28 bytes UTF-8) to attach to the transaction',
+    example: 'escrow-payout-ref-001',
+  })
   @ApiResponse({ status: 200, description: 'Unsigned release transaction XDR' })
-  @ApiResponse({ status: 400, description: 'Invalid or missing sourceAccount' })
+  @ApiResponse({ status: 400, description: 'Invalid or missing sourceAccount, or memo too long' })
   @ApiResponse({ status: 403, description: 'Source account not authorized' })
   @ApiResponse({ status: 404, description: 'Escrow not found or not linked on-chain' })
   @ApiResponse({ status: 503, description: 'TRUSTFLOW_CONTRACT_ID not configured' })
   async buildReleaseTransaction(
     @Param('id') id: string,
-    @Query() { sourceAccount }: BuildReleaseTransactionQueryDto,
+    @Query() { sourceAccount, memo }: BuildReleaseTransactionQueryDto,
   ) {
     const escrow = await this.escrowService.findById(id);
     if (!escrow) throw new NotFoundException(`Escrow ${id} not found`);
@@ -420,6 +426,7 @@ export class EscrowController {
     return this.escrowReleaseTransactionBuilderService.buildRelease(
       escrow.contractEscrowId,
       sourceAccount,
+      memo,
     );
   }
 
